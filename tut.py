@@ -8,6 +8,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+
+# TODO: handle double click
 #Press printscreen to start tracking clicks, when done press it again to stop then press escape to end program   
 
 obsidian_vault_dir = os.getenv('OBSIDIAN_PATH')
@@ -27,51 +29,67 @@ tutorial_steps = []
 num = 0
 def on_click(x, y, button, pressed):
     if pressed and button != mouse.Button.middle:
-        time.sleep(0.4)#reaction time for xyplorer selection on laptop
+        #time.sleep(0.4)#reaction time for xyplorer selection on laptop
         with mss() as sct:
             #capture region based on click position
             monitor = {
-                "top": max(y - 200, 0),  # 200px from the top unless outside screen
-                "left": max(x - 200, 0),  # 200px from the left
-                "mon": 2
+                "top": max(y - 200, 0),  # 200px from the top unless outside screen otherwise start at zero
+                "left": max(x - 200, 0), 
             }
-            monitor["width"] =  (2560 - left) if monitor["left"] + 400 > 2560 else 400
-            monitor["height"] =  (1440 - top) if monitor["top"] + 400 > 1440 else 400
+            # Do not capture when position is higher than screen resolution
+            monitor["width"] =  (2560 - monitor["left"]) if monitor["left"] + 400 > 2560 else 400
+            monitor["height"] =  (1440 - monitor["top"]) if monitor["top"] + 400 > 1440 else 400
             
+            # Calculate actual mouse position, relevent when outside of screen and capture region is not 200
+            topOffset = y - monitor["top"]
+            leftOffset = x - monitor["left"]
+
             # Get a screenshot of the mon monitor
             sct_img = sct.grab(monitor)
 
-            # Create an Image
+            # Create an empty Image
             img = Image.new("RGB", sct_img.size)
+            
+            # Open cursor image
             imCursor = Image.open('click.png')
+            imCursorHeight, imCursorWidth = imCursor.size
+
             # Best solution: create a list(tuple(R, G, B), ...) for putdata()
+            # Copy pixels from screenshot into empty image
             pixels = zip(sct_img.raw[2::4], sct_img.raw[1::4], sct_img.raw[::4])
             img.putdata(list(pixels))
-            #Paste cursor at click position, mss doesn't capture the cursor
-            img.paste(imCursor, box=(200-16,200-16),mask=imCursor)
+            
+            # Paste cursor at click position, mss doesn't capture the cursor (+2 is arbitary)
+            img.paste(imCursor, box=(leftOffset-int(imCursorHeight/2)+2,topOffset-int(imCursorWidth/2)+2),mask=imCursor)
+            
+            # Save image into some obsidian vault folder
             global num
             dir = obsidian_vault_dir + "Images\\" + dt_string + " " + tutorial_name
             if not os.path.exists(dir):
                 os.mkdir(dir)
             fileName =  dt_string + "Tut-Screenshot"+ str(num+1)+".png"
+            
+            # Add imagename as another step in the tutorial for later formatting
             tutorial_steps.append(fileName)
+            
             img.save(dir + "\\" + fileName)
             num+=1
 
 
 
     
-# ...or, in a non-blocking fashion:
+# non-blocking mouse litener
 mouseListener = mouse.Listener(
     on_click=on_click)
+
 running = False
 prevMod = False
-# TODO: handle double click
-# TODO: Do not show regions outside of the monitor
+
 def on_press(key):
     global running
     global mouseListener
     global prevMod
+    # Start listening to mouse clicks ect
     if key == keyboard.Key.print_screen:
         if not running:
             running = True
@@ -80,26 +98,28 @@ def on_press(key):
             mouseListener.stop()
             running = False
     elif key == keyboard.Key.esc:
+        # Finish sequence and output into an obsidian note in table format
         print(tutorial_steps)
         with open(obsidian_vault_dir + "\\" + tutorial_name + ".md", 'w', encoding="utf-8") as file:
             file.write("Steps|Action\n -----|-----")
             for i, step in enumerate(tutorial_steps):
                 if step[0] != "^":
+                    # ^ denotes a keystroke in the list. To differentiate from image steps.
                     # Creates markup table in Obsidian
                     file.write("\n**Step {num}**:|![[{step}]]".format(step=step, num=i+1))#Add |200 for siz                    
-                    #file.write("\n<hr>\n**Step {num}**:\n<hr>\n>![[{step}]]\n".format(step=step, num=i+1))#Add |200 for sizee
                 else:
+                    # Process key combination as a step
                     keyName = step[1:].split(".")
-                    
                     if len(keyName) > 1:
                         keyName = keyName[1].capitalize()
                     else:
                         keyName = keyName[0].capitalize()
                     print(keyName)
                     file.write("\n**Step {num}**: |Press the key: {step}".format(step=keyName, num=i+1))
-                    #file.write("<hr>\n**Step {num}**: Press the key: {step}".format(step=keyName, num=i+1))
+        # return False to stop listening to keyboard and end program
         return False
     elif len(tutorial_steps) == 0:
+        # considers case when there are no previous steps to check against for repetition
         k = str(key).replace("_l","")
         k = k.replace("_r","")
         tutorial_steps.append("^" + k)
@@ -112,13 +132,10 @@ def on_press(key):
             tutorial_steps[-1] = tutorial_steps[-1] + "+" + str(chr(ord(key.char)+96)) 
             prevMod = True
         else:
-            print("some",key)
             prevMod = False
             k = str(key).replace("_l","")
             k = k.replace("_r","")
             tutorial_steps.append("^" + k)   
-
-    
 
 
 # Collect events until released
